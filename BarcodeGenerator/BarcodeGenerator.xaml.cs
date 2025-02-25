@@ -17,6 +17,7 @@ using UserControl = System.Windows.Controls.UserControl;
 using MessageBox = System.Windows.MessageBox;
 using PrintDialog = System.Windows.Forms.PrintDialog;
 using System.Diagnostics;
+using ZXing.QrCode.Internal;
 
 
 namespace BarcodeGenerator
@@ -41,7 +42,7 @@ namespace BarcodeGenerator
         {
             if (string.IsNullOrWhiteSpace(Code))
             {
-                return new clsResponse { Message = "Code is required!", Success = false };
+                return new clsResponse { Message = "Please input an alpha-numeric Code to proceed", Success = false };
             }
             if (!Regex.IsMatch(Code, @"^[a-zA-Z0-9]+$"))
             {
@@ -50,14 +51,19 @@ namespace BarcodeGenerator
 
             if (string.IsNullOrWhiteSpace(Name))
             {
-                return new clsResponse { Message = "Item Name is required!", Success = false };
+                return new clsResponse { Message = "Please input a name for this item. You are recommended to use meaningful names", Success = false };
             }
 
             if (string.IsNullOrWhiteSpace(Price))
             {
-                return new clsResponse { Message = "Price is required!", Success = false };
+                return new clsResponse { Message = "Please input a price for this item.", Success = false };
             }
-            
+
+            if (!decimal.TryParse(Price, out _))
+            {
+                return new clsResponse { Message = "Price must be a valid number!", Success = false };
+            }
+
             if (!Regex.IsMatch(PaperSize, @"(\d+)\s*x\s*(\d+)"))
             {
                 return new clsResponse { Message = "Invalid paper size format. Use 'WidthxHeight' (e.g., '90x60' or 'A9 (37x52)').", Success = false };
@@ -98,7 +104,7 @@ namespace BarcodeGenerator
 
         public BarcodeGenerator()
         {
-
+            model = new BarcodeModel(); // Initialize model instance
             InitializeComponent();
             outputSection.Visibility = Visibility.Collapsed;
             PopulateFonts();
@@ -151,27 +157,25 @@ namespace BarcodeGenerator
         {
             try
             {
-
-                model = new BarcodeModel
+                if (model == null)
                 {
-                    Code = txtCode.Text.Trim(),
-                    Name = CultureInfo.CurrentCulture.TextInfo.ToTitleCase(txtName.Text.Trim().ToLower()),
-                    Price = txtPrice.Text.Trim(),
-                    CodeFont = new FontFamily(cmbFonts.Text),
-                    LabelPrinterName = txtName.Text.Trim(),
-                    IncludeItemName = chkName.IsChecked == true,
-                    IncludePrice = chkPrice.IsChecked == true,
-                    PaperSize = cmbPaperSize.SelectedItem.ToString(),
-                    BlockOutput = txtBlockOutput,
-                    StackPanel = outputSection,
-                    SelectedPrinter = cmbPrinter.SelectedItem.ToString(),
-                    GeneratedImage = radioQRCode.IsChecked == true ? GenerateQRCode(txtCode.Text.Trim(), 250) : GenerateBarcode(txtCode.Text.Trim(), 300, 100)
-                };
+                    model = new BarcodeModel();
+                }
+                model.Code = txtCode.Text.Trim();
+                model.Name = CultureInfo.CurrentCulture.TextInfo.ToTitleCase(txtName.Text.Trim().ToLower());
+                model.Price = txtPrice.Text.Trim();
+                model.CodeFont = new FontFamily(cmbFonts.Text);
+                model.IncludePrice = chkPrice.IsChecked == true;
+                model.BlockOutput = txtBlockOutput;
+                model.StackPanel = outputSection;
+                model.GeneratedImage = radioQRCode.IsChecked == true ? GenerateQRCode(txtCode.Text.Trim(), 250) : GenerateBarcode(txtCode.Text.Trim(), 300, 100);
 
-                if (model.GeneratedImage != null&& !string.IsNullOrWhiteSpace(model.Price))
+
+
+                if (model.GeneratedImage != null && !string.IsNullOrWhiteSpace(model.Price))
                 {
                     model.StackPanel.Visibility = Visibility.Visible;
-                    model.Price = 'N' + model.Price;
+
                 }
 
                 var validationResponse = model.Validate();
@@ -180,6 +184,7 @@ namespace BarcodeGenerator
                     MessageBox.Show(validationResponse.Message, "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
+                model.Price = 'N' + model.Price;
                 Console.WriteLine(model.PaperSize);
 
                 if (radioQRCode.IsChecked == true)
@@ -299,21 +304,20 @@ namespace BarcodeGenerator
 
         private void btnPrint_Click(object sender, RoutedEventArgs e)
         {
-            model = new BarcodeModel
+            if (model == null)
             {
-                Code = txtCode.Text.Trim(),
-                Name = CultureInfo.CurrentCulture.TextInfo.ToTitleCase(txtName.Text.Trim().ToLower()),
-                Price = txtPrice.Text.Trim(),
-                CodeFont = new FontFamily(cmbFonts.Text),
-                LabelPrinterName = txtName.Text.Trim(),
-                IncludeItemName = chkName.IsChecked == true,
-                IncludePrice = chkPrice.IsChecked == true,
-                PaperSize = cmbPaperSize.SelectedItem?.ToString(),
-                StackPanel = outputSection,
-                BlockOutput = txtBlockOutput,
-                SelectedPrinter = cmbPrinter.SelectedItem.ToString(),
-                GeneratedImage = radioQRCode.IsChecked == true ? GenerateQRCode(txtCode.Text.Trim(), 250) : GenerateBarcode(txtCode.Text.Trim(), 300, 100)
-            };
+                model = new BarcodeModel();
+            }
+
+
+            model.PaperSize = cmbPaperSize.SelectedItem.ToString();
+            model.BlockOutput = txtBlockOutput;
+            model.Price = txtPrice.Text.Trim();
+            model.StackPanel = outputSection;
+            model.LabelPrinterName = txtName.Text.Trim(); model.IncludeItemName = chkName.IsChecked == true;
+            model.SelectedPrinter = cmbPrinter.SelectedItem.ToString();
+
+
             var validationResponse = model.Validate();
             if (!validationResponse.Success)
             {
@@ -323,9 +327,8 @@ namespace BarcodeGenerator
             try
             {
 
-                PrintBarcode(model.PaperSize, printableArea, model.SelectedPrinter);
-                model.BlockOutput.Visibility = Visibility.Visible;
-                model.StackPanel.Visibility = Visibility.Collapsed;
+                PrintBarcode(model.PaperSize, printableArea, model.SelectedPrinter, model);
+
 
             }
             catch (Exception ex)
@@ -334,7 +337,7 @@ namespace BarcodeGenerator
             }
         }
 
-        public static void PrintBarcode(string paperSize, StackPanel layoutToPrint, string selectedPrinter)
+        public static void PrintBarcode(string paperSize, StackPanel layoutToPrint, string selectedPrinter, BarcodeModel model)
         {
 
             try
@@ -400,7 +403,13 @@ namespace BarcodeGenerator
                         if (printDialog.ShowDialog() == DialogResult.OK)
                         {
                             printDocument.Print();
-                            MessageBox.Show("Printing successful.", "Print Success", MessageBoxButton.OK, MessageBoxImage.Exclamation);
+                            MessageBoxResult result = MessageBox.Show("Printing successful.", "Print Success", MessageBoxButton.OK, MessageBoxImage.Exclamation);
+
+                            if (result == MessageBoxResult.OK)
+                            {
+                                model.BlockOutput.Visibility = Visibility.Visible;
+                                model.StackPanel.Visibility = Visibility.Collapsed;
+                            }
                         }
 
 
