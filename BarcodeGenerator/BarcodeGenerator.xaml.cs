@@ -54,6 +54,11 @@ namespace BarcodeGenerator
                 return new clsResponse { Message = "Please input a name for this item. You are recommended to use meaningful names", Success = false };
             }
 
+            if (!Regex.IsMatch(Name, @"^[a-zA-Z\s]+$"))
+            {
+                return new clsResponse { Message = "Please provide a valid name!", Success = false };
+            }
+
             if (string.IsNullOrWhiteSpace(Price))
             {
                 return new clsResponse { Message = "Please input a price for this item.", Success = false };
@@ -169,10 +174,13 @@ namespace BarcodeGenerator
                 model.BlockOutput = txtBlockOutput;
                 model.StackPanel = outputSection;
                 model.GeneratedImage = radioQRCode.IsChecked == true ? GenerateQRCode(txtCode.Text.Trim(), 250) : GenerateBarcode(txtCode.Text.Trim(), 300, 100);
+                model.PaperSize = cmbPaperSize.SelectedItem.ToString();
+                model.LabelPrinterName = txtName.Text.Trim(); model.IncludeItemName = chkName.IsChecked == true;
+                model.SelectedPrinter = cmbPrinter.SelectedItem.ToString();
 
 
 
-                if (model.GeneratedImage != null && !string.IsNullOrWhiteSpace(model.Price))
+                if (model.GeneratedImage != null && !string.IsNullOrWhiteSpace(model.Price) && decimal.TryParse(model.Price, out _))
                 {
                     model.StackPanel.Visibility = Visibility.Visible;
 
@@ -339,18 +347,19 @@ namespace BarcodeGenerator
 
         public static void PrintBarcode(string paperSize, StackPanel layoutToPrint, string selectedPrinter, BarcodeModel model)
         {
-
             try
             {
                 Match match = Regex.Match(paperSize, @"(\d+)\s*x\s*(\d+)");
                 if (!match.Success)
                 {
-                    MessageBox.Show("Invalid paper size format. Use 'WidthxHeight' (e.g., '90x60').", "Print Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
-
+                    MessageBox.Show("Invalid paper size format. Use 'WidthxHeight' (e.g., '60x40').", "Print Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
                 }
 
-                int paperWidth = int.Parse(match.Groups[1].Value) * 10;
-                int paperHeight = int.Parse(match.Groups[2].Value) * 10;
+
+                double conversionFactor = 100.0 / 25.4;
+                int paperWidth = (int)(int.Parse(match.Groups[1].Value) * conversionFactor);
+                int paperHeight = (int)(int.Parse(match.Groups[2].Value) * conversionFactor);
 
                 TextOptions.SetTextRenderingMode(layoutToPrint, TextRenderingMode.ClearType);
 
@@ -366,13 +375,18 @@ namespace BarcodeGenerator
                 BitmapEncoder encoder = new PngBitmapEncoder();
                 encoder.Frames.Add(BitmapFrame.Create(rtb));
 
-                using (System.IO.MemoryStream stream = new System.IO.MemoryStream())
+                using (MemoryStream stream = new MemoryStream())
                 {
                     encoder.Save(stream);
                     using (Bitmap bitmap = new Bitmap(stream))
                     {
                         PrintDocument printDocument = new PrintDocument();
                         printDocument.PrinterSettings.PrinterName = selectedPrinter;
+
+                        printDocument.DocumentName = model.Name + " Invoice";
+
+                        printDocument.DefaultPageSettings.Margins = new Margins(0, 0, 0, 0);
+
                         printDocument.DefaultPageSettings.PaperSize = new PaperSize("Custom", paperWidth, paperHeight);
 
                         printDocument.PrintPage += (s, ev) =>
@@ -390,10 +404,10 @@ namespace BarcodeGenerator
 
                                 ev.Graphics.DrawImage(bitmap, posX, posY, imgWidth, imgHeight);
 
+                                ev.HasMorePages = false;
                             }
                             catch (Exception ex)
                             {
-
                                 MessageBox.Show("Printing error: " + ex.Message, "Print Error", MessageBoxButton.OK, MessageBoxImage.Error);
                             }
                         };
@@ -411,16 +425,12 @@ namespace BarcodeGenerator
                                 model.StackPanel.Visibility = Visibility.Collapsed;
                             }
                         }
-
-
                     }
                 }
-
             }
             catch (Exception ex)
             {
                 MessageBox.Show("An error occurred: " + ex.Message, "Print Error", MessageBoxButton.OK, MessageBoxImage.Error);
-
             }
         }
     }
