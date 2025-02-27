@@ -18,6 +18,8 @@ using MessageBox = System.Windows.MessageBox;
 using PrintDialog = System.Windows.Forms.PrintDialog;
 using System.Diagnostics;
 using ZXing.QrCode.Internal;
+using static System.Runtime.CompilerServices.RuntimeHelpers;
+using System.Linq;
 
 
 namespace BarcodeGenerator
@@ -33,20 +35,16 @@ namespace BarcodeGenerator
         public bool IncludeItemName { get; set; }
         public bool IncludePrice { get; set; }
         public string PaperSize { get; set; }
-        public StackPanel StackPanel { get; set; }
-        public TextBlock BlockOutput { get; set; }
         public string SelectedPrinter { get; set; }
-        public Bitmap GeneratedImage { get; set; }
+        public bool isQrCode { get; set; }
 
         public clsResponse Validate()
         {
+            var installedPrinters = PrinterSettings.InstalledPrinters.Cast<string>().ToList();
+
             if (string.IsNullOrWhiteSpace(Code))
             {
-                return new clsResponse { Message = "Please input an alpha-numeric Code to proceed", Success = false };
-            }
-            if (!Regex.IsMatch(Code, @"^[a-zA-Z0-9]+$"))
-            {
-                return new clsResponse { Message = "Code must be alphanumeric!", Success = false };
+                return new clsResponse { Message = "Please input code for this item", Success = false };
             }
 
             if (string.IsNullOrWhiteSpace(Name))
@@ -54,19 +52,9 @@ namespace BarcodeGenerator
                 return new clsResponse { Message = "Please input a name for this item. You are recommended to use meaningful names", Success = false };
             }
 
-            if (!Regex.IsMatch(Name, @"^[a-zA-Z\s]+$"))
-            {
-                return new clsResponse { Message = "Please provide a valid name!", Success = false };
-            }
-
             if (string.IsNullOrWhiteSpace(Price))
             {
                 return new clsResponse { Message = "Please input a price for this item.", Success = false };
-            }
-
-            if (!decimal.TryParse(Price, out _))
-            {
-                return new clsResponse { Message = "Price must be a valid number!", Success = false };
             }
 
             if (!Regex.IsMatch(PaperSize, @"(\d+)\s*x\s*(\d+)"))
@@ -78,20 +66,12 @@ namespace BarcodeGenerator
                 return new clsResponse { Message = "Please select a paper size.", Success = false };
             }
 
-            if (string.IsNullOrEmpty(SelectedPrinter))
+            if (!string.IsNullOrEmpty(SelectedPrinter) && !installedPrinters.Contains(SelectedPrinter))
             {
-                return new clsResponse { Message = "Please select a printer.", Success = false };
+                return new clsResponse { Message = "Printer is not installed on device. Please use an available printer.", Success = false };
             }
-            if (GeneratedImage == null)
-            {
-                return new clsResponse { Message = "Please generate a Barcode or QR code first.", Success = false };
 
-            }
-            if (!StackPanel.IsVisible)
-            {
-                return new clsResponse { Message = "Please the output must first be initialized. Generate a Barcode or QR code first.", Success = false };
 
-            }
             return new clsResponse { Message = "Validation successful.", Success = true };
         }
     }
@@ -109,8 +89,8 @@ namespace BarcodeGenerator
 
         public BarcodeGenerator()
         {
-            model = new BarcodeModel(); // Initialize model instance
             InitializeComponent();
+            model = new BarcodeModel();
             outputSection.Visibility = Visibility.Collapsed;
             PopulateFonts();
             PopulatePrinters();
@@ -162,64 +142,24 @@ namespace BarcodeGenerator
         {
             try
             {
+
                 if (model == null)
                 {
-                    model = new BarcodeModel();
+                    BarcodeModel model = new BarcodeModel(); // Initialize model instance
+
                 }
+
                 model.Code = txtCode.Text.Trim();
-                model.Name = CultureInfo.CurrentCulture.TextInfo.ToTitleCase(txtName.Text.Trim().ToLower());
+                model.Name = txtName.Text.Trim();
                 model.Price = txtPrice.Text.Trim();
                 model.CodeFont = new FontFamily(cmbFonts.Text);
                 model.IncludePrice = chkPrice.IsChecked == true;
-                model.BlockOutput = txtBlockOutput;
-                model.StackPanel = outputSection;
-                model.GeneratedImage = radioQRCode.IsChecked == true ? GenerateQRCode(txtCode.Text.Trim(), 250) : GenerateBarcode(txtCode.Text.Trim(), 300, 100);
                 model.PaperSize = cmbPaperSize.SelectedItem.ToString();
-                model.LabelPrinterName = txtName.Text.Trim(); model.IncludeItemName = chkName.IsChecked == true;
+                model.LabelPrinterName = txtName.Text.Trim();
+                model.IncludeItemName = chkName.IsChecked == true;
                 model.SelectedPrinter = cmbPrinter.SelectedItem.ToString();
-
-
-
-                if (model.GeneratedImage != null && !string.IsNullOrWhiteSpace(model.Price) && decimal.TryParse(model.Price, out _))
-                {
-                    model.StackPanel.Visibility = Visibility.Visible;
-
-                }
-
-                var validationResponse = model.Validate();
-                if (!validationResponse.Success)
-                {
-                    MessageBox.Show(validationResponse.Message, "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    return;
-                }
-                model.Price = 'N' + model.Price;
-                Console.WriteLine(model.PaperSize);
-
-                if (radioQRCode.IsChecked == true)
-                {
-                    imgPreview.LayoutTransform = new ScaleTransform(0.5, 0.5);
-                }
-                else
-                {
-                    imgPreview.LayoutTransform = new ScaleTransform(0.8, 0.8);
-                }
-
-                imgPreview.Source = ConvertBitmapToImageSource(model.GeneratedImage);
-                txtBlockCode.Text = model.Code;
-
-
-                txtBlockName.FontFamily = new FontFamily(model.CodeFont.ToString());
-                txtBlockPrice.FontFamily = new FontFamily(model.CodeFont.ToString());
-                txtBlockCode.FontFamily = new FontFamily(model.CodeFont.ToString());
-
-                txtBlockName.Text = chkName.IsChecked == true ? model.Name : string.Empty;
-                txtBlockName.Visibility = chkName.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
-
-                txtBlockPrice.Text = chkPrice.IsChecked == true ? model.Price : string.Empty;
-                txtBlockPrice.Visibility = chkPrice.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
-
-                model.BlockOutput.Visibility = Visibility.Collapsed;
-                model.StackPanel.Visibility = Visibility.Visible;
+                model.isQrCode = (bool)radioQRCode.IsChecked;
+                GenerateBarcodeModel(model);
             }
             catch (Exception ex)
             {
@@ -227,38 +167,72 @@ namespace BarcodeGenerator
             }
         }
 
-        private Bitmap GenerateBarcode(string code, int width = 300, int height = 100)
+        public clsResponse GenerateBarcodeModel(BarcodeModel model)
         {
-            if (string.IsNullOrWhiteSpace(code) || width <= 0 || height <= 0)
+
+
+            if (!string.IsNullOrWhiteSpace(model.Price) && decimal.TryParse(model.Price, out _))
+            {
+                outputSection.Visibility = Visibility.Visible;
+            }
+
+            var validationResponse = model.Validate();
+            if (!validationResponse.Success)
+            {
+                MessageBox.Show(validationResponse.Message, "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return new clsResponse { Message = validationResponse.Message, Success = false };
+                ;
+            }
+
+            imgPreview.LayoutTransform = model.isQrCode == true ? new ScaleTransform(0.5, 0.5) : new ScaleTransform(0.8, 0.8);
+            //imgPreview.Source = ConvertBitmapToImageSource(model.GeneratedImage);
+            txtBlockCode.Text = model.Code;
+            txtBlockName.FontFamily = model.CodeFont;
+            txtBlockPrice.FontFamily = model.CodeFont;
+            txtBlockCode.FontFamily = model.CodeFont;
+            txtBlockName.Text = chkName.IsChecked == true ? model.Name : string.Empty;
+            txtBlockName.Visibility = chkName.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+            txtBlockPrice.Text = chkPrice.IsChecked == true ? model.Price : string.Empty;
+            txtBlockPrice.Visibility = chkPrice.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+            txtBlockOutput.Visibility = Visibility.Collapsed;
+            outputSection.Visibility = Visibility.Visible;
+
+            txtCode.Text = model.Code;
+            txtName.Text = model.Name;
+            //txtPrice.Text = decimal.TryParse(new string(model.Price.Where(c => char.IsDigit(c) || c == '.').ToArray()), out var result) ? result.ToString() : "0";
+            ;
+
+            cmbFonts.Text = model.CodeFont?.Source;
+            cmbPrinter.SelectedItem = model.SelectedPrinter;
+            cmbPaperSize.SelectedItem = model.PaperSize;
+            chkPrice.IsChecked = model.IncludePrice;
+            chkName.IsChecked = model.IncludeItemName;
+            radioQRCode.IsChecked = model.isQrCode;
+
+            Bitmap generatedImage = model.isQrCode == true ? GenerateBarcodeImage(model.Code, model.isQrCode, 250) : GenerateBarcodeImage(model.Code, model.isQrCode, 300, 100);
+            imgPreview.Source = ConvertBitmapToImageSource(generatedImage);
+            if (imgPreview.Source != null)
+            {
+                return new clsResponse { Message = "Code generated successfully", Success = true };
+
+            }
+            return new clsResponse { Message = "Code generation failed", Success = false };
+
+        }
+
+
+        private Bitmap GenerateBarcodeImage(string code, bool isQRCode, int width, int height = 0)
+        {
+            if (string.IsNullOrWhiteSpace(code) || width <= 0 || height < 0)
                 return null;
 
             var writer = new BarcodeWriterPixelData
             {
-                Format = BarcodeFormat.CODE_128,
+                Format = isQRCode ? BarcodeFormat.QR_CODE : BarcodeFormat.CODE_128,
                 Options = new EncodingOptions
                 {
                     Width = width,
-                    Height = height,
-                    Margin = 2
-                }
-            };
-
-            var pixelData = writer.Write(code);
-            return pixelData != null && pixelData.Pixels.Length > 0 ? PixelDataToBitmap(pixelData) : null;
-        }
-
-        private Bitmap GenerateQRCode(string code, int size = 250)
-        {
-            if (string.IsNullOrWhiteSpace(code) || size <= 0)
-                return null;
-
-            var writer = new BarcodeWriterPixelData
-            {
-                Format = BarcodeFormat.QR_CODE,
-                Options = new EncodingOptions
-                {
-                    Width = size,
-                    Height = size,
+                    Height = isQRCode ? width : height,
                     Margin = 2
                 }
             };
@@ -312,19 +286,29 @@ namespace BarcodeGenerator
 
         private void btnPrint_Click(object sender, RoutedEventArgs e)
         {
+
             if (model == null)
             {
-                model = new BarcodeModel();
+                BarcodeModel model = new BarcodeModel(); // Initialize model instance
+
             }
 
+            if (!outputSection.IsVisible)
+            {
+                MessageBox.Show("Printing error: please generate a QRCODE or BARCODE to print" , "Print Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
 
             model.PaperSize = cmbPaperSize.SelectedItem.ToString();
-            model.BlockOutput = txtBlockOutput;
             model.Price = txtPrice.Text.Trim();
-            model.StackPanel = outputSection;
-            model.LabelPrinterName = txtName.Text.Trim(); model.IncludeItemName = chkName.IsChecked == true;
+            model.LabelPrinterName = txtName.Text.Trim();
+            model.IncludeItemName = chkName.IsChecked == true;
             model.SelectedPrinter = cmbPrinter.SelectedItem.ToString();
-
+            if (!outputSection.IsVisible)
+            {
+                MessageBox.Show("Printing error: please generate a QRCODE or BARCODE to print", "Print Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
 
             var validationResponse = model.Validate();
             if (!validationResponse.Success)
@@ -332,45 +316,44 @@ namespace BarcodeGenerator
                 MessageBox.Show(validationResponse.Message, "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
-            try
-            {
-
-                PrintBarcode(model.PaperSize, printableArea, model.SelectedPrinter, model);
-
-
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show("An error occurred while printing: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
+            PrintBarcode(model);
         }
 
-        public static void PrintBarcode(string paperSize, StackPanel layoutToPrint, string selectedPrinter, BarcodeModel model)
+        public void PrintBarcode(BarcodeModel model)
         {
             try
             {
-                Match match = Regex.Match(paperSize, @"(\d+)\s*x\s*(\d+)");
+              
+
+                Match match = Regex.Match(model.PaperSize, @"(\d+)\s*x\s*(\d+)");
                 if (!match.Success)
                 {
                     MessageBox.Show("Invalid paper size format. Use 'WidthxHeight' (e.g., '60x40').", "Print Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
 
-
                 double conversionFactor = 100.0 / 25.4;
                 int paperWidth = (int)(int.Parse(match.Groups[1].Value) * conversionFactor);
                 int paperHeight = (int)(int.Parse(match.Groups[2].Value) * conversionFactor);
 
-                TextOptions.SetTextRenderingMode(layoutToPrint, TextRenderingMode.ClearType);
+                TextOptions.SetTextRenderingMode(printableArea, TextRenderingMode.ClearType);
+
+                // Ensure printableArea is measured and arranged before rendering
+                printableArea.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
+                printableArea.Arrange(new Rect(printableArea.DesiredSize));
 
                 int dpi = 600;
-                int renderWidth = (int)(layoutToPrint.ActualWidth * dpi / 96);
-                int renderHeight = (int)(layoutToPrint.ActualHeight * dpi / 96);
+                int renderWidth = (int)(printableArea.ActualWidth * dpi / 96);
+                int renderHeight = (int)(printableArea.ActualHeight * dpi / 96);
+
+                if (renderWidth <= 0 || renderHeight <= 0)
+                {
+                    MessageBox.Show("Error: Render size is invalid. Printable area is not fully loaded.", "Rendering Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
 
                 RenderTargetBitmap rtb = new RenderTargetBitmap(renderWidth, renderHeight, dpi, dpi, PixelFormats.Pbgra32);
-                layoutToPrint.Measure(new System.Windows.Size(layoutToPrint.ActualWidth, layoutToPrint.ActualHeight));
-                layoutToPrint.Arrange(new Rect(new System.Windows.Size(layoutToPrint.ActualWidth, layoutToPrint.ActualHeight)));
-                rtb.Render(layoutToPrint);
+                rtb.Render(printableArea);
 
                 BitmapEncoder encoder = new PngBitmapEncoder();
                 encoder.Frames.Add(BitmapFrame.Create(rtb));
@@ -381,12 +364,13 @@ namespace BarcodeGenerator
                     using (Bitmap bitmap = new Bitmap(stream))
                     {
                         PrintDocument printDocument = new PrintDocument();
-                        printDocument.PrinterSettings.PrinterName = selectedPrinter;
-
+                        if (string.IsNullOrWhiteSpace(model.SelectedPrinter))
+                        {
+                            model.SelectedPrinter = new PrinterSettings().PrinterName ?? "Default Printer";
+                        }
+                        printDocument.PrinterSettings.PrinterName = model.SelectedPrinter;
                         printDocument.DocumentName = model.Name + " Invoice";
-
                         printDocument.DefaultPageSettings.Margins = new Margins(0, 0, 0, 0);
-
                         printDocument.DefaultPageSettings.PaperSize = new PaperSize("Custom", paperWidth, paperHeight);
 
                         printDocument.PrintPage += (s, ev) =>
@@ -395,7 +379,6 @@ namespace BarcodeGenerator
                             {
                                 int pageWidth = ev.PageBounds.Width;
                                 int pageHeight = ev.PageBounds.Height;
-
                                 float scale = Math.Min((float)pageWidth / bitmap.Width, (float)pageHeight / bitmap.Height);
                                 int imgWidth = (int)(bitmap.Width * scale);
                                 int imgHeight = (int)(bitmap.Height * scale);
@@ -403,34 +386,24 @@ namespace BarcodeGenerator
                                 int posY = (pageHeight - imgHeight) / 2;
 
                                 ev.Graphics.DrawImage(bitmap, posX, posY, imgWidth, imgHeight);
-
                                 ev.HasMorePages = false;
                             }
                             catch (Exception ex)
                             {
+                                Console.WriteLine(ex);
                                 MessageBox.Show("Printing error: " + ex.Message, "Print Error", MessageBoxButton.OK, MessageBoxImage.Error);
                             }
                         };
 
-                        PrintDialog printDialog = new PrintDialog();
-                        printDialog.PrinterSettings = printDocument.PrinterSettings;
-                        if (printDialog.ShowDialog() == DialogResult.OK)
-                        {
-                            printDocument.Print();
-                            MessageBoxResult result = MessageBox.Show("Printing successful.", "Print Success", MessageBoxButton.OK, MessageBoxImage.Exclamation);
-
-                            if (result == MessageBoxResult.OK)
-                            {
-                                model.BlockOutput.Visibility = Visibility.Visible;
-                                model.StackPanel.Visibility = Visibility.Collapsed;
-                            }
-                        }
+                        printDocument.Print();
+                        txtBlockOutput.Visibility = Visibility.Visible;
+                        outputSection.Visibility = Visibility.Collapsed;
                     }
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show("An error occurred: " + ex.Message, "Print Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show("An error occurred while printing: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
     }
